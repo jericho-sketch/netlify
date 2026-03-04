@@ -1,0 +1,8 @@
+{
+  "name": "seo-metadata-tool",
+  "version": "1.0.0",
+  "description": "SEO Metadata Generator for luxury apartment properties",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0"
+  }
+}
