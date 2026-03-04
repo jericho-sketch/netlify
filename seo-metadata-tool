@@ -6,3 +6,10 @@
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
+```
+
+Also check your `netlify/functions` folder in GitHub — when you click into it, do you see `generate.js` sitting directly inside the `functions` folder? The path should be:
+```
+netlify/
+  functions/
+    generate.js
