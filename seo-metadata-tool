@@ -1,0 +1,271 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+  {
+  "name": "seo-metadata-tool",
+  "version": "1.0.0",
+  "description": "SEO Metadata Generator for luxury apartment properties",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0"
+  }
+}
+
+const Anthropic = require("@anthropic-ai/sdk");
+
+const LIMITS = { title: { min: 50, max: 60 }, meta: { min: 140, max: 160 }, h1: { min: 20, max: 70 } };
+
+const EXAMPLES = {
+  "Rivery Park": [
+    { url: "https://www.riveryparkapts.com/", title: "The Summit at Rivery Park: Luxury Apartments in Georgetown, TX", meta: "Discover luxury apartments in Georgetown, TX at The Summit at Rivery Park Apartments with studio, 1, 2 & 3 bedroom floor plans & resort-style amenities. Tour now!", h1: "Luxury Apartments in Georgetown, TX" },
+    { url: "https://www.riveryparkapts.com/amenities", title: "Amenities & Neighborhood | Pet-Friendly Apartments with Pool & Gym in Georgetown", meta: "Explore luxury amenities at The Summit at Rivery Park Apartments—resort-style pool, fitness center, dog park, garage parking, and lounges in Georgetown, TX.", h1: "Amenities" },
+    { url: "https://www.riveryparkapts.com/floorplans/one-bedroom", title: "1 Bedroom Apartments in Georgetown | The Summit at Rivery Park", meta: "Browse 1 bedroom layouts at The Summit at Rivery Park Apartments in Georgetown, TX. View pricing, amenities, and availability in our luxury apartment community.", h1: "1 Bedroom Floor Plans" },
+    { url: "https://www.riveryparkapts.com/floorplans/two-bedroom", title: "2 Bedroom Apartments in Georgetown | The Summit at Rivery Park", meta: "Discover 2 bedroom floor plans at The Summit at Rivery Park Apartments in Georgetown, TX. View layouts, pricing, square footage, and current availability.", h1: "2 Bedroom Floor Plans" },
+    { url: "https://www.riveryparkapts.com/floorplans", title: "Floor Plans | Studio, 1, 2 & 3 Bedroom Apartments in Georgetown", meta: "View studio, 1, 2 & 3 bedroom floor plans at The Summit at Rivery Park Apartments in Georgetown, TX. Explore layouts, pricing, square footage, and availability.", h1: "Studio, 1, 2 & 3 Bedroom Floor Plans" },
+  ],
+  "Avita Alamo Heights": [
+    { url: "https://www.avitaah.com/", title: "Avita Alamo Heights: Luxury Apartments in San Antonio, TX", meta: "Discover our luxury apartments in San Antonio, TX at Avita Alamo Heights with 1, 2, & 3-bedroom floor plans, a resort-style pool, pet area, & more. Tour Now!", h1: "Luxury Apartments in San Antonio, TX" },
+    { url: "https://www.avitaah.com/floorplans", title: "Floor Plans | 1, 2, & 3 Bedroom Apartments in Alamo Heights", meta: "Discover 1, 2, & 3 bedroom luxury apartments at Avita Alamo Heights in San Antonio, TX. Spacious layouts, modern finishes, and top amenities await—tour today!", h1: "1, 2, & 3 Bedroom Floor Plans" },
+    { url: "https://www.avitaah.com/floorplans/one-bedroom", title: "1 Bedroom Apartments in San Antonio, TX | Avita Alamo Heights", meta: "Explore 1 bedroom apartments at Avita Alamo Heights in San Antonio, TX, featuring stylish floor plans and luxury amenities. Book your tour today!", h1: "One-Bedroom Floor Plans" },
+    { url: "https://www.avitaah.com/floorplans/two-bedroom", title: "2 Bedroom Apartments in San Antonio, TX | Avita Alamo Heights", meta: "Find your perfect 2 bedroom apartments at Avita Alamo Heights in San Antonio, TX. Enjoy modern floor plans, luxury amenities, and easy availability. Tour today!", h1: "Two-Bedroom Floor Plans" },
+    { url: "https://www.avitaah.com/amenities", title: "Amenities & Neighborhood | San Antonio Apartments with Clubhouse & Pool", meta: "Enjoy luxury living at Avita Alamo Heights in San Antonio, TX. Resort-style pool, 24-hour fitness center, pet play area, clubhouse & more—discover today!", h1: "Amenities & Neighborhood" },
+  ],
+  "Muir Lake": [
+    { url: "https://www.muir-lake.com/", title: "Muir Lake Apartments: Luxury Apartments in Cedar Park, TX", meta: "Discover luxury apartments in Cedar Park, TX at Muir Lake with 1 & 2 bedroom floor plans, a resort-style pool, fitness center & pet-friendly features. Tour now!", h1: "Luxury Apartments in Cedar Park, TX" },
+    { url: "https://www.muir-lake.com/amenities", title: "Amenities & Neighborhood | Pet-Friendly Apartments with Pool & Gym in Cedar Park", meta: "Enjoy the amenities at Muir Lake Apartments—pool, lake views, sauna, steam room, Paw Spa, detached garages, fitness center, and outdoor recreation in Cedar Park, TX.", h1: "Amenities" },
+    { url: "https://www.muir-lake.com/floorplans", title: "Floor Plans | 1 & 2 Bedroom Apartments in Cedar Park, TX", meta: "Choose from 1 & 2 bedroom floor plans at Muir Lake Apartments. View pricing, square footage, and availability to find the right apartment for you.", h1: "1 & 2 Bedroom Floor Plans" },
+    { url: "https://www.muir-lake.com/floorplans/one-bedroom", title: "1 Bedroom Apartments in Cedar Park TX | Muir Lake Apartments", meta: "Explore 1 bedroom apartments at Muir Lake in Cedar Park, TX. View layouts, amenities, pricing, and availability in our lakeside community.", h1: "1 Bedroom Floor Plans" },
+    { url: "https://www.muir-lake.com/floorplans/two-bedroom", title: "2 Bedroom Apartments in Cedar Park TX | Muir Lake Apartments", meta: "Discover 2 bedroom apartments at Muir Lake in Cedar Park, TX. View floor plans, square footage, pricing, and availability today.", h1: "2 Bedroom Floor Plans" },
+  ],
+};
+
+function buildPrompt(url, keyword) {
+  const exampleBlocks = Object.entries(EXAMPLES).map(([prop, exs]) => {
+    const exStr = exs.map((e, i) =>
+      `Example ${i+1}:\n  URL: ${e.url}\n  H1: ${e.h1}\n  Title: ${e.title}\n  Meta: ${e.meta}`
+    ).join("\n\n");
+    return `--- ${prop} ---\n${exStr}`;
+  }).join("\n\n");
+
+  return `You are an SEO expert specializing in luxury apartment communities. Study the following approved SEO metadata examples from 3 properties. Learn their tone, style, structure, and patterns, then apply them to generate metadata for the new URL.
+
+APPROVED EXAMPLES:
+${exampleBlocks}
+
+NOW GENERATE FOR:
+URL: ${url}
+${keyword ? `Target keyword: ${keyword}` : ""}
+
+Return ONLY valid JSON (no markdown, no backticks, no explanation):
+{"title":"...","meta":"...","h1":"..."}
+
+Rules:
+- title: ${LIMITS.title.min}–${LIMITS.title.max} characters, include keyword naturally
+- meta: ${LIMITS.meta.min}–${LIMITS.meta.max} characters, compelling, include keyword, end with a CTA like "Tour now!" or "View today!"
+- h1: ${LIMITS.h1.min}–${LIMITS.h1.max} characters, clear and descriptive, include keyword
+- Match the voice and style of the approved examples
+- Infer the property name, city, and page type from the URL`;
+}
+
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: "Method Not Allowed" };
+  }
+
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const { url, keyword } = JSON.parse(event.body);
+    if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: "URL is required" }) };
+
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const message = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      messages: [{ role: "user", content: buildPrompt(url, keyword) }],
+    });
+
+    const text = message.content.find(b => b.type === "text")?.text || "";
+    const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+    return { statusCode: 200, headers, body: JSON.stringify(parsed) };
+  } catch (e) {
+    console.error(e);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "Generation failed" }) };
+  }
+};
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SEO Metadata Generator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #f3f4f6; margin: 0; padding: 24px; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 700; color: #111827; margin: 0; }
+  .subtitle { color: #6b7280; font-size: 14px; margin: 4px 0 0; }
+  .badge { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; margin: 16px 0; font-size: 13px; color: #374151; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  button { cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 600; border-radius: 6px; padding: 9px 18px; border: none; }
+  .btn-primary { background: #4f46e5; color: #fff; }
+  .btn-secondary { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+  .btn-ml { margin-left: auto; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .card.done { background: #fafffe; }
+  .row-inputs { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 14px; flex-wrap: wrap; }
+  .col-url { flex: 2; min-width: 200px; }
+  .col-kw { flex: 1; min-width: 140px; }
+  label { font-size: 12px; font-weight: 600; color: #374151; display: block; margin-bottom: 4px; }
+  input, textarea { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; font-family: inherit; }
+  textarea { resize: vertical; }
+  .btn-gen { background: #4f46e5; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 13px; white-space: nowrap; height: 36px; }
+  .btn-gen:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-remove { background: none; border: none; color: #9ca3af; font-size: 20px; padding: 0 4px; line-height: 1; cursor: pointer; }
+  .divider { border-top: 1px solid #e5e7eb; padding-top: 14px; margin-top: 4px; }
+  .field { margin-bottom: 12px; }
+  .charbar-meta { display: flex; justify-content: space-between; font-size: 11px; color: #6b7280; margin-bottom: 2px; margin-top: 4px; }
+  .charbar-track { background: #e5e7eb; border-radius: 4px; height: 4px; }
+  .charbar-fill { height: 4px; border-radius: 4px; transition: width 0.3s; }
+  .error { color: #ef4444; font-size: 13px; margin: 0 0 12px; }
+  .footer { font-size: 11px; color: #9ca3af; text-align: center; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SEO Metadata Generator</h1>
+  <p class="subtitle">Generates title tags, meta descriptions, and H1s matched to your brand style.</p>
+  <div class="badge"><span class="dot"></span> Examples loaded — Rivery Park, Avita Alamo Heights, Muir Lake</div>
+  <div class="toolbar">
+    <button class="btn-primary" onclick="generateAll()">⚡ Generate All</button>
+    <button class="btn-secondary" onclick="copyAll()">📋 Copy All Results</button>
+    <button class="btn-secondary btn-ml" onclick="addRow()">+ Add URL</button>
+  </div>
+  <div id="rows"></div>
+  <p class="footer">Results are AI-generated based on your approved examples. Always review before publishing.</p>
+</div>
+<script>
+const LIMITS = { title: { min: 50, max: 60 }, meta: { min: 140, max: 160 }, h1: { min: 20, max: 70 } };
+let rows = [
+  { id: 1, url: "", keyword: "", title: "", meta: "", h1: "", loading: false, done: false, error: "" },
+  { id: 2, url: "", keyword: "", title: "", meta: "", h1: "", loading: false, done: false, error: "" }
+];
+let nextId = 3;
+
+function charColor(len, min, max) {
+  return len < min ? "#f59e0b" : len <= max ? "#22c55e" : "#ef4444";
+}
+function charBarHtml(id, field, min, max) {
+  return `<div class="charbar-meta">
+    <span id="charcount-${id}-${field}" style="color:${charColor(0,min,max)}">0 chars</span>
+    <span>${min}–${max} recommended</span>
+  </div>
+  <div class="charbar-track"><div class="charbar-fill" id="charbar-${id}-${field}" style="width:0%;background:${charColor(0,min,max)}"></div></div>`;
+}
+function updateCharBar(id, field, value, min, max) {
+  const len = value.length;
+  const pct = Math.min((len / max) * 100, 100);
+  const color = charColor(len, min, max);
+  const c = document.getElementById(`charcount-${id}-${field}`);
+  const b = document.getElementById(`charbar-${id}-${field}`);
+  if (c) { c.textContent = `${len} chars`; c.style.color = color; }
+  if (b) { b.style.width = `${pct}%`; b.style.background = color; }
+}
+function esc(s) { return (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+function rowHtml(row) {
+  return `<div class="card${row.done?" done":""}" id="card-${row.id}">
+    <div class="row-inputs">
+      <div class="col-url">
+        <label>Page URL <span style="color:#ef4444">*</span></label>
+        <input type="text" value="${esc(row.url)}" placeholder="https://example.com/page" oninput="setField(${row.id},'url',this.value)" />
+      </div>
+      <div class="col-kw">
+        <label>Target Keyword</label>
+        <input type="text" value="${esc(row.keyword)}" placeholder="e.g. luxury apartments" oninput="setField(${row.id},'keyword',this.value)" />
+      </div>
+      <button class="btn-gen" onclick="generate(${row.id})" ${row.loading||!row.url.trim()?"disabled":""}>${row.loading?"Generating…":"Generate"}</button>
+      ${rows.length>1?`<button class="btn-remove" onclick="removeRow(${row.id})">×</button>`:""}
+    </div>
+    ${row.error?`<p class="error">${row.error}</p>`:""}
+    ${row.done||row.title||row.meta||row.h1?`
+    <div class="divider">
+      <div class="field">
+        <label>H1</label>
+        <input type="text" value="${esc(row.h1)}" oninput="setField(${row.id},'h1',this.value);updateCharBar(${row.id},'h1',this.value,${LIMITS.h1.min},${LIMITS.h1.max})" />
+        ${charBarHtml(row.id,'h1',LIMITS.h1.min,LIMITS.h1.max)}
+      </div>
+      <div class="field">
+        <label>Title Tag</label>
+        <input type="text" value="${esc(row.title)}" oninput="setField(${row.id},'title',this.value);updateCharBar(${row.id},'title',this.value,${LIMITS.title.min},${LIMITS.title.max})" />
+        ${charBarHtml(row.id,'title',LIMITS.title.min,LIMITS.title.max)}
+      </div>
+      <div class="field">
+        <label>Meta Description</label>
+        <textarea rows="3" oninput="setField(${row.id},'meta',this.value);updateCharBar(${row.id},'meta',this.value,${LIMITS.meta.min},${LIMITS.meta.max})">${esc(row.meta)}</textarea>
+        ${charBarHtml(row.id,'meta',LIMITS.meta.min,LIMITS.meta.max)}
+      </div>
+    </div>`:""}
+  </div>`;
+}
+function render() {
+  document.getElementById("rows").innerHTML = rows.map(rowHtml).join("");
+  rows.forEach(r => {
+    if (r.h1) updateCharBar(r.id,'h1',r.h1,LIMITS.h1.min,LIMITS.h1.max);
+    if (r.title) updateCharBar(r.id,'title',r.title,LIMITS.title.min,LIMITS.title.max);
+    if (r.meta) updateCharBar(r.id,'meta',r.meta,LIMITS.meta.min,LIMITS.meta.max);
+  });
+}
+function setField(id, field, value) {
+  rows = rows.map(r => r.id===id ? {...r,[field]:value} : r);
+}
+function addRow() {
+  if (rows.length>=10) return;
+  rows.push({ id: nextId++, url:"", keyword:"", title:"", meta:"", h1:"", loading:false, done:false, error:"" });
+  render();
+}
+function removeRow(id) {
+  rows = rows.filter(r => r.id!==id);
+  render();
+}
+async function generate(id) {
+  const row = rows.find(r => r.id===id);
+  if (!row.url.trim()) return;
+  rows = rows.map(r => r.id===id ? {...r, loading:true, error:""} : r);
+  render();
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: row.url, keyword: row.keyword })
+    });
+    const parsed = await res.json();
+    if (!res.ok) throw new Error(parsed.error);
+    rows = rows.map(r => r.id===id ? {...r, title:parsed.title||"", meta:parsed.meta||"", h1:parsed.h1||"", loading:false, done:true, error:""} : r);
+  } catch(e) {
+    rows = rows.map(r => r.id===id ? {...r, loading:false, error:"Generation failed. Please try again."} : r);
+  }
+  render();
+}
+function generateAll() {
+  rows.forEach(r => { if (r.url.trim() && !r.loading) generate(r.id); });
+}
+function copyAll() {
+  const text = rows.filter(r => r.done).map(r =>
+    `URL: ${r.url}\nH1: ${r.h1}\nTitle: ${r.title}\nMeta: ${r.meta}`
+  ).join("\n\n");
+  navigator.clipboard.writeText(text).then(() => alert("Copied to clipboard!"));
+}
+render();
+</script>
+</body>
+</html>
